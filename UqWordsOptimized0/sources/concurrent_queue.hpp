@@ -16,7 +16,7 @@ struct concurrent_queue: pinned_object
     std::unique_lock<std::mutex> hold_lock { m_mutex, std::try_to_lock };    
     if (!hold_lock)
       return false;
-    m_items.push_back (std::forward<Current_item_type>(item));
+    m_items.emplace_back (std::forward<Current_item_type>(item));
     m_ready.notify_one ();
     return true;
   }
@@ -39,10 +39,10 @@ struct concurrent_queue: pinned_object
 
   template <typename Current_item_type>  
   requires (std::is_convertible_v<Current_item_type, Item_type>)
-  void wait_push (Current_item_type&& item)
+  void wait_push (Current_item_type&& item)  
   {
     std::unique_lock<std::mutex> hold_lock { m_mutex };
-    m_items.push_back (std::forward<Current_item_type>(item));
+    m_items.emplace_back (std::forward<Current_item_type>(item));
     m_ready.notify_one ();
   }
 

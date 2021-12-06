@@ -2,9 +2,6 @@
 
 #include <thread>
 #include <mutex>
-#include <memory>
-#include <vector>
-#include <functional>
 #include <future>
 #include <type_traits>
 
@@ -13,7 +10,8 @@
 
 struct thread_pool: pinned_object
 {
-  using task_type = std::function<void(const std::stop_token&, size_t)>;
+  using task_type = std::function<void()>;
+
   using coqueue_type = concurrent_queue<task_type>;
 
   thread_pool(size_t num_threads, size_t num_spins = 32)  
@@ -34,7 +32,7 @@ struct thread_pool: pinned_object
   }
 
   template <typename Task_type>
-  requires (std::is_invocable_v<Task_type, const std::stop_token&, size_t>)
+  requires (std::is_invocable_v<Task_type>)
   void task_dispatch(Task_type&& task)
   {
     const auto number_of_iteration = m_spins * m_count ;
@@ -55,21 +53,22 @@ struct thread_pool: pinned_object
   template <typename Task_type, typename... Args>
   auto async(Task_type&& task, Args&&... args)
   {
-    using result_type = std::invoke_result_t<Task_type, Args...>;
-    std::promise<result_type> promise;
-    auto future = promise.get_future();
-    task_dispatch ([&, p = std::move(promise), t = std::forward<Task_type>(task)] 
-      (const std::stop_token& token, size_t index) mutable 
-      {
-        if constexpr (!std::is_void_v<result_type>) 
-          p.set_value (t (std::forward<Args> (args)...));
-        else {
-          t (std::forward<Args> (args)...);
-          p.set_value ();
-        }
-      }
-    );
-    return future;
+    using result_type = std::invoke_result_t<std::decay_t<Task_type>, std::decay_t<Args>...>;
+    using packaged_type = std::packaged_task<result_type()>;
+
+    auto task_wrapper = std::make_shared<packaged_type> (std::bind (
+      [task { std::forward<Task_type>(task) }] (Args& ... args) {
+        return task (std::forward<Args>(args)...);
+      },
+      std::forward<Args>(args)...));
+
+    auto task_future = task_wrapper->get_future();
+
+    task_dispatch ([task_wrapper { std::move (task_wrapper) }] () {
+      (*task_wrapper)();
+    });
+
+    return task_future;
   }
 
 private:
@@ -88,7 +87,7 @@ private:
       
       if (!current_task && !m_queues[index % m_count].wait_pop (current_task))
         break;
-      current_task (stop_token, index);
+      current_task ();
     }
   }
 
