@@ -75,10 +75,10 @@ struct mmap_wrapper
   static auto map_span(const file_wrapper& file, uint64_t begin, uint64_t end, int prot = PROT_READ, int flags = MAP_PRIVATE) 
     -> std::tuple<mmap_wrapper, std::span<T>>;
 
-  template <typename T = char>
+  template <typename T = char>              
   static auto map_string_view(const file_wrapper& file, uint64_t begin, uint64_t end, int prot = PROT_READ, int flags = MAP_SHARED)  
     -> std::tuple<mmap_wrapper, std::basic_string_view<T>>;
-
+       
   static auto alignment_size() noexcept -> size_t
   {
     // I assume this is always power of two

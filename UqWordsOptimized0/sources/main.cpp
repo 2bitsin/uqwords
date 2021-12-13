@@ -32,9 +32,9 @@ struct producer_task
     {}
   };
 
-  producer_task (std::size_t num_threads = std::thread::hardware_concurrency())
+  producer_task (std::uint32_t num_threads = std::thread::hardware_concurrency())
   : m_pool { num_threads },
-    m_tasks_waiting { num_threads * 8}
+    m_tasks_waiting { std::uint32_t(num_threads * 8u) }
   {}
 
   //~producer_task() {}
@@ -89,7 +89,7 @@ struct producer_task
     {
       auto end_here = view.find_first_of(' ', start_here);
       auto word = view.substr(start_here, end_here - start_here);
-      words.emplace<std::string>(word.begin(), word.end());
+      words.emplace(std::string (word.begin(), word.end()));
       start_here = view.find_first_not_of(' ', end_here);
     }
   }
