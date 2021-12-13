@@ -17,7 +17,7 @@
 
 using word_set_type = std::unordered_set<std::string>;
 
-struct producer_task
+struct master_set_collector
 {
 
   struct set_collection_context
@@ -32,19 +32,20 @@ struct producer_task
     {}
   };
 
-  producer_task (std::uint32_t num_threads = std::thread::hardware_concurrency())
+  master_set_collector (std::uint32_t num_threads = std::thread::hardware_concurrency())
   : m_pool { num_threads },
     m_tasks_waiting { std::uint32_t(num_threads * 8u) }
   {}
 
-  //~producer_task() {}
+  //~master_set_collector() {}
 
-  void consume(std::filesystem::path file_name)  
+  void process_file(std::filesystem::path file_name)  
   {
     using namespace std;
     using namespace fmt;
     using namespace string_view_literals;
     using namespace string_literals;
+    using namespace chrono_literals;
 
     auto file { file_wrapper::open (file_name, O_RDONLY) };
     
@@ -55,8 +56,7 @@ struct producer_task
 
     while (bytes_remaining > 0)
     {
-      m_tasks_waiting.acquire();
-      
+      m_tasks_waiting.acquire();      
       auto bytes_to_take = std::min (bytes_remaining, block_size);
       auto start_here = file.size() - bytes_remaining;
       auto [handle, block_view] = file.map_string_view(start_here, start_here + bytes_to_take);
@@ -67,11 +67,20 @@ struct producer_task
       // Using shared ptr to work around limitations of std::function later on :/
       auto context_ptr = std::make_shared<set_collection_context>(std::move (handle), std::move (block_view));
 
-      m_pool.task_dispatch([this, context_ptr { std::move (context_ptr) }] () {
-        perform_set_collection_task(*context_ptr);
-        m_tasks_waiting.release();
-      });
+      m_result_queue.push_back (m_pool.async([this, context_ptr { std::move (context_ptr) }] () {
+        perform_set_collection_task(*context_ptr);        
+        m_tasks_waiting.release(); 
+        return context_ptr;
+      }));
     }
+    word_set_type master_set;
+    for(auto&& s: m_result_queue)
+    {
+      auto context_ptr = s.get();
+      master_set.merge(context_ptr->m_words);
+    }
+
+    std::cout << master_set.size() << "\n";
   }
 
   void perform_set_collection_task(set_collection_context& context)
@@ -92,13 +101,13 @@ struct producer_task
       words.emplace(std::string (word.begin(), word.end()));
       start_here = view.find_first_not_of(' ', end_here);
     }
+
   }
 
 private:
-  //std::condition_variable m_ready;
-  //std::mutex m_ready_mutex;
-  std::counting_semaphore<> m_tasks_waiting;  
+  std::counting_semaphore<> m_tasks_waiting;
   thread_pool m_pool;
+  std::deque<std::future<std::shared_ptr<set_collection_context>>> m_result_queue;
 };
 
 int main(int argc, char** argv)
@@ -120,9 +129,9 @@ int main(int argc, char** argv)
     if (file_size < 1)
       throw runtime_error(format("File '{}' is empty!"s, args.at(1).string()));
 
-    producer_task producer;
+    master_set_collector producer;
 
-    producer.consume(file_path);
+    producer.process_file(file_path);
 
     return 0;
   }
