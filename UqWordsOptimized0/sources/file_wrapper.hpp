@@ -4,12 +4,14 @@
 #include <cstddef>
 #include <utility>
 #include <filesystem>
+#include <string_view>
 
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 
+#include "mmap_wrapper.hpp"
 
 struct file_wrapper
 {
@@ -66,8 +68,22 @@ struct file_wrapper
     return st.st_size;
   } 
 
+  auto map (std::size_t size = 0, std::size_t offset = 0, int prot = PROT_READ, int flags = MAP_PRIVATE)
+    -> mmap_wrapper;
+
+  template <typename T = std::byte>
+  auto map_span (std::uint64_t begin = 0, std::uint64_t end = 0, int prot = PROT_READ, int flags = MAP_PRIVATE)
+    -> std::tuple<mmap_wrapper, std::span<T>>;
+
+  template <typename T = char>
+  auto map_string_view(uint64_t begin, uint64_t end, int prot = PROT_READ, int flags = MAP_SHARED)  
+    -> std::tuple<mmap_wrapper, std::basic_string_view<T>>;
+
 
   auto get() const noexcept { return m_fd; }
 private:
   int m_fd;
 };
+
+#include "mmap_wrapper_impl.hpp"
+#include "file_wrapper_impl.hpp"

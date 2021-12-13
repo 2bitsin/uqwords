@@ -1,13 +1,15 @@
 #pragma once
 
-#include "file_wrapper.hpp"
-
 #include <cstdint>
 #include <cstddef>
 #include <utility>
 #include <span>
+#include <string_view>
 
 #include <sys/mman.h>
+
+
+struct file_wrapper;
 
 struct mmap_wrapper
 {
@@ -45,52 +47,50 @@ struct mmap_wrapper
     }    
   }
 
+  template <typename T = void>
+  auto addr () const noexcept -> T* {
+     return (T*)m_addr; 
+  }  
+
+  template <typename T = void>
+  auto size () const noexcept -> size_t { 
+    if constexpr (std::is_same_v<T, void>) {
+      return m_size;
+    } else {
+      return m_size / sizeof(T);
+    }
+    return m_size; 
+  }   
+
   template <typename T>
   auto as_span() const noexcept -> std::span<T>
   {
-    return { reinterpret_cast<T*>(m_addr), m_size / sizeof(T) };
+    return { addr<T>(), size<T>() };
   }
 
-  static auto map(const file_wrapper& file, size_t size = 0, off_t offset = 0, int prot = PROT_READ, int flags = MAP_PRIVATE)
-    -> mmap_wrapper 
-  {
-    size = size ? size : file.size();
-    auto mapped_addr = ::mmap (nullptr, size, prot, flags, file.get(), offset);
-    if (mapped_addr == MAP_FAILED) {
-      throw std::system_error { errno, std::system_category() };
-    }
-    return mmap_wrapper(mapped_addr, size);
-  }
+  static auto map(const file_wrapper& file, size_t size = 0, size_t offset = 0, int prot = PROT_READ, int flags = MAP_PRIVATE) 
+    -> mmap_wrapper;
 
-  template <typename T>
-  static auto map_range(const file_wrapper& file, uint64_t begin, uint64_t end, int prot = PROT_READ, int flags = MAP_PRIVATE)  
-    -> std::tuple<mmap_wrapper, std::span<T>>
-  {
-    // I assume this is always power of two
-    static const auto align_value { mmap_wrapper::aligment() };
-    static const auto align_mask { ~(align_value - 1) };
+  template <typename T = std::byte>
+  static auto map_span(const file_wrapper& file, uint64_t begin, uint64_t end, int prot = PROT_READ, int flags = MAP_PRIVATE) 
+    -> std::tuple<mmap_wrapper, std::span<T>>;
 
-    const auto start_offset = begin & align_mask;
-    const auto end_offset = (end + align_value - 1) & align_mask;
+  template <typename T = char>
+  static auto map_string_view(const file_wrapper& file, uint64_t begin, uint64_t end, int prot = PROT_READ, int flags = MAP_SHARED)  
+    -> std::tuple<mmap_wrapper, std::basic_string_view<T>>;
 
-    const auto length = end_offset - start_offset;
-
-    const auto span_begin = (begin - start_offset) / sizeof(T);
-    const auto span_length = (end - begin) / sizeof(T);
-
-    auto the_map = mmap_wrapper::map(file, length, start_offset, prot, flags);
-    auto the_span = the_map.as_span<T>();
-
-    return { std::move(the_map), the_span.subspan(span_begin, span_length) };
-  }
-
-  static auto aligment() noexcept -> size_t
+  static auto alignment_size() noexcept -> size_t
   {
     // I assume this is always power of two
     return ::sysconf(_SC_PAGESIZE);
   }
 
+  static auto alignment_mask() noexcept -> size_t
+  {
+    return ~(alignment_size() - 1);
+  }
 private:
   void*   m_addr { nullptr };
   size_t  m_size { 0 };
 };
+

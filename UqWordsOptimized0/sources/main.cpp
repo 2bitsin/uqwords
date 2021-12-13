@@ -1,49 +1,112 @@
 #include <iostream>
-#include <fstream>
-#include <deque>
 #include <vector>
 #include <string_view>
 #include <filesystem>
 #include <unordered_set>
 #include <chrono>
 #include <span>
+#include <algorithm>
+#include <semaphore>
+#include <ranges>
 
 #include <fmt/core.h>
 
 #include "concurrent_queue.hpp"
 #include "thread_pool.hpp"
 #include "file_wrapper.hpp"
-#include "mmap_wrapper.hpp"
 
-struct parse_and_hash_task
+using word_set_type = std::unordered_set<std::string>;
+
+struct producer_task
 {
-  mmap_wrapper                      m_chunk_mapping;
-  std::uint64_t                     m_mapping_offset;
-  std::size_t                       m_mapping_size;
-  std::uint64_t                     m_chunk_offset;
-  std::size_t                       m_chunk_size;
-  std::unordered_set<std::string>   m_current_word_set;
-  std::future<void>                 m_future;
-};
 
-struct merge_sets_task
-{
-  std::vector<parse_and_hash_task*> m_sets_to_merge;
-  std::unordered_set<std::string>   m_current_word_set;
-  std::future<void>                 m_future;
-};
+  struct set_collection_context
+  {
+    mmap_wrapper m_mmap;
+    std::string_view m_view;
+    word_set_type m_words;  
 
+    set_collection_context(mmap_wrapper mmap, std::string_view view)
+    : m_mmap { std::move(mmap) }
+    , m_view { std::move(view) }
+    {}
+  };
+
+  producer_task (std::size_t num_threads = std::thread::hardware_concurrency())
+  : m_pool { num_threads },
+    m_tasks_waiting { num_threads * 8}
+  {}
+
+  //~producer_task() {}
+
+  void consume(std::filesystem::path file_name)  
+  {
+    using namespace std;
+    using namespace fmt;
+    using namespace string_view_literals;
+    using namespace string_literals;
+
+    auto file { file_wrapper::open (file_name, O_RDONLY) };
+    
+    auto bytes_remaining = file.size();
+
+    const auto block_size = (1024*1024) & mmap_wrapper::alignment_mask(); 
+    const auto wait_threshold = std::thread::hardware_concurrency() * 8;
+
+    while (bytes_remaining > 0)
+    {
+      m_tasks_waiting.acquire();
+      
+      auto bytes_to_take = std::min (bytes_remaining, block_size);
+      auto start_here = file.size() - bytes_remaining;
+      auto [handle, block_view] = file.map_string_view(start_here, start_here + bytes_to_take);
+      auto last_space_off = block_view.find_last_of(' ') + 1;
+      block_view = block_view.substr(0, last_space_off);
+      bytes_remaining -= last_space_off;
+      
+      // Using shared ptr to work around limitations of std::function later on :/
+      auto context_ptr = std::make_shared<set_collection_context>(std::move (handle), std::move (block_view));
+
+      m_pool.task_dispatch([this, context_ptr { std::move (context_ptr) }] () {
+        perform_set_collection_task(*context_ptr);
+        m_tasks_waiting.release();
+      });
+    }
+  }
+
+  void perform_set_collection_task(set_collection_context& context)
+  {
+    using namespace std;
+    using namespace string_view_literals;
+    using namespace string_literals;
+
+    auto& view  = context.m_view;
+    auto& words = context.m_words;
+    auto& mmap  = context.m_mmap;
+
+    auto start_here = view.find_first_not_of(' ');
+    while (start_here != std::string_view::npos)
+    {
+      auto end_here = view.find_first_of(' ', start_here);
+      auto word = view.substr(start_here, end_here - start_here);
+      words.emplace<std::string>(word.begin(), word.end());
+      start_here = view.find_first_not_of(' ', end_here);
+    }
+  }
+
+private:
+  //std::condition_variable m_ready;
+  //std::mutex m_ready_mutex;
+  std::counting_semaphore<> m_tasks_waiting;  
+  thread_pool m_pool;
+};
 
 int main(int argc, char** argv)
 {
   using namespace std;
-  using namespace string_view_literals;
-  using namespace string_literals;
+  using namespace fmt;
   using namespace chrono;
 
-  const auto block_size { (1024*1024) & ~(mmap_wrapper::aligment() - 1) };
-
-  using namespace fmt;
   try
   {
     vector<filesystem::path> args{ argv, argv + argc };
@@ -57,17 +120,9 @@ int main(int argc, char** argv)
     if (file_size < 1)
       throw runtime_error(format("File '{}' is empty!"s, args.at(1).string()));
 
-    thread_pool pool { std::thread::hardware_concurrency() };
+    producer_task producer;
 
-    concurrent_queue<parse_and_hash_task> parse_tasks_queue;
-    concurrent_queue<merge_sets_task> merge_tasks_queue;
-
-    file_wrapper file = file_wrapper::open (file_path, O_RDONLY);
-
-    auto data_remaining = 1ull * file.size();
-    auto current_offset = 0ull;
-
-    auto [map, span] = mmap_wrapper::map_range<uint8_t>(file, 0x637, 0x637+16, O_RDONLY, MAP_PRIVATE);
+    producer.consume(file_path);
 
     return 0;
   }
