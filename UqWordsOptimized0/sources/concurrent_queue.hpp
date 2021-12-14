@@ -50,8 +50,10 @@ struct concurrent_queue: pinned_object
   {
     std::unique_lock<std::mutex> hold_lock { m_mutex };
 
-    while (m_items.empty () && !m_done) 
+    while (m_items.empty () && !m_done) {
+      m_empty.notify_all ();
       m_ready.wait (hold_lock);
+    }
     
     if (!m_done)
     {
@@ -59,9 +61,17 @@ struct concurrent_queue: pinned_object
       m_items.pop_front ();
       return true;
     }
-
+    
+    m_empty.notify_all ();
     return false;
   }  
+
+  void wait_until_empty()
+  {
+    std::unique_lock hold_lock { m_mutex };
+    while (!m_items.empty ())
+      m_empty.wait (hold_lock); 
+  }
 
  ~concurrent_queue ()
   {
@@ -73,6 +83,8 @@ struct concurrent_queue: pinned_object
 private:  
   std::deque<Item_type>   m_items;
   std::mutex              m_mutex;
-  std::condition_variable m_ready;
+  std::condition_variable m_ready;  
   std::atomic<bool>       m_done;
+  
+  std::condition_variable m_empty;
 };

@@ -20,6 +20,22 @@
 			]
 		},
 		{
+			"label": "Make (RELEASE WITH DEBUG INFO)",
+			"type": "shell",
+			"command": "make",
+			"problemMatcher": [],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"options": {
+				"cwd": "${workspaceFolder}/build"
+			},
+			"dependsOn": [
+				"CMake (RELEASE WITH DEBUG INFO)"
+			]
+		},
+		{
 			"label": "Make (DEBUG)",
 			"type": "shell",
 			"command": "make",
@@ -49,6 +65,19 @@
 			}
 		},
 		{
+			"label": "CMake (RELEASE WITH DEBUG INFO)",
+			"type": "shell",
+			"command": "cmake",
+			"args": [
+				"-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+				".."
+			],
+			"problemMatcher": [],
+			"options": {
+				"cwd": "${workspaceFolder}/build"
+			}
+		},		
+		{
 			"label": "CMake (DEBUG)",
 			"type": "shell",
 			"command": "cmake",
@@ -60,6 +89,38 @@
 			"options": {
 				"cwd": "${workspaceFolder}/build"			
 			}
-		}
+		},
+		{
+			"label": "CMake (Profiling build)",
+			"type": "shell",
+			"command": "cmake",
+			"args": [
+				"-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+				"-DCMAKE_CXX_FLAGS=-pg", 
+				"-DCMAKE_EXE_LINKER_FLAGS=-pg",
+				"-DCMAKE_SHARED_LINKER_FLAGS=-pg",
+				".."
+			],
+			"problemMatcher": [],
+			"options": {
+				"cwd": "${workspaceFolder}/build"			
+			}
+		},
+		{
+			"label": "Make (Profiling build)",
+			"type": "shell",
+			"command": "make",
+			"problemMatcher": [],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"options": {
+				"cwd": "${workspaceFolder}/build"
+			},
+			"dependsOn": [
+				"CMake (Profiling build)"
+			]
+		},
 	]
 }

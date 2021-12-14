@@ -10,7 +10,7 @@
 
 struct thread_pool: pinned_object
 {
-  using task_type = std::function<void()>;
+  using task_type = std::function<void(std::size_t index)>;
 
   using coqueue_type = concurrent_queue<task_type>;
 
@@ -32,8 +32,8 @@ struct thread_pool: pinned_object
   }
 
   template <typename Task_type>
-  requires (std::is_invocable_v<Task_type>)
-  void task_dispatch(Task_type&& task)
+  requires (std::is_invocable_v<Task_type, std::size_t>)
+  void enqueue(Task_type&& task)
   {
     const auto number_of_iteration = m_spins * m_count ;
     const auto next_slot = m_index++ ;
@@ -49,7 +49,7 @@ struct thread_pool: pinned_object
     m_queues[next_slot % m_count]
       .wait_push (std::forward<Task_type>(task));
   }
- 
+  
   template <typename Task_type, typename... Args>
   auto async(Task_type&& task, Args&&... args)
   {
@@ -64,15 +64,21 @@ struct thread_pool: pinned_object
 
     auto task_future = task_wrapper->get_future();
 
-    task_dispatch ([task_wrapper { std::move (task_wrapper) }] () {
+    enqueue ([task_wrapper { std::move (task_wrapper) }] (std::size_t index) {
       (*task_wrapper)();
     });
 
     return task_future;
   }
 
+  void wait_for_all()
+  {
+    for(auto i = 0; i < m_count; ++i)
+      m_queues[i].wait_until_empty();
+  }
+
 private:
-  void perform_tasks(const std::stop_token& stop_token, size_t index)
+  void perform_tasks(const std::stop_token& stop_token, std::size_t index)
   {
     const auto number_of_iteration = m_spins * m_count;
     
@@ -87,7 +93,7 @@ private:
       
       if (!current_task && !m_queues[index % m_count].wait_pop (current_task))
         break;
-      current_task ();
+      current_task (index);
     }
   }
 

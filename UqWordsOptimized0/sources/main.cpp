@@ -3,7 +3,6 @@
 #include <string_view>
 #include <filesystem>
 #include <unordered_set>
-#include <chrono>
 #include <span>
 #include <algorithm>
 #include <semaphore>
@@ -15,31 +14,32 @@
 #include "thread_pool.hpp"
 #include "file_wrapper.hpp"
 
-using word_set_type = std::unordered_set<std::string>;
-
-struct master_set_collector
+struct word_set_scan
 {
+  using word_set_container = std::unordered_set<std::string>;
 
-  struct set_collection_context
+  struct task_context
   {
     mmap_wrapper m_mmap;
     std::string_view m_view;
-    word_set_type m_words;  
 
-    set_collection_context(mmap_wrapper mmap, std::string_view view)
+    task_context(mmap_wrapper mmap, std::string_view view)
     : m_mmap { std::move(mmap) }
     , m_view { std::move(view) }
-    {}
+    {}    
   };
 
-  master_set_collector (std::uint32_t num_threads = std::thread::hardware_concurrency())
-  : m_pool { num_threads },
-    m_tasks_waiting { std::uint32_t(num_threads * 8u) }
+  word_set_scan (std::size_t block_size = 1024*1024, std::uint32_t num_threads = std::thread::hardware_concurrency())
+  : m_num_threads       { num_threads },
+    m_intermediate_sets { std::make_unique<word_set_container[]>(num_threads) },
+    m_tasks_waiting     { std::uint32_t(num_threads * 16u) },
+    m_thread_pool       { num_threads },
+    m_block_size        { block_size & mmap_wrapper::alignment_mask() }
   {}
 
   //~master_set_collector() {}
 
-  void process_file(std::filesystem::path file_name)  
+  void perform(std::filesystem::path file_name)  
   {
     using namespace std;
     using namespace fmt;
@@ -49,15 +49,12 @@ struct master_set_collector
 
     auto file { file_wrapper::open (file_name, O_RDONLY) };
     
-    auto bytes_remaining = file.size();
-
-    const auto block_size = (1024*1024) & mmap_wrapper::alignment_mask(); 
-    const auto wait_threshold = std::thread::hardware_concurrency() * 8;
+    auto bytes_remaining = file.size();    
 
     while (bytes_remaining > 0)
     {
       m_tasks_waiting.acquire();      
-      auto bytes_to_take = std::min (bytes_remaining, block_size);
+      auto bytes_to_take = std::min (bytes_remaining, m_block_size);
       auto start_here = file.size() - bytes_remaining;
       auto [handle, block_view] = file.map_string_view(start_here, start_here + bytes_to_take);
       auto last_space_off = block_view.find_last_of(' ') + 1;
@@ -65,49 +62,45 @@ struct master_set_collector
       bytes_remaining -= last_space_off;
       
       // Using shared ptr to work around limitations of std::function later on :/
-      auto context_ptr = std::make_shared<set_collection_context>(std::move (handle), std::move (block_view));
-
-      m_result_queue.push_back (m_pool.async([this, context_ptr { std::move (context_ptr) }] () {
-        perform_set_collection_task(*context_ptr);        
-        m_tasks_waiting.release(); 
-        return context_ptr;
-      }));
+      auto context_ptr = std::make_shared<task_context>(std::move (handle), std::move (block_view));
+      m_thread_pool.enqueue ([this, context_ptr { std::move (context_ptr) }] (std::size_t index) {
+        perform_set_collection_task(*context_ptr, index);        
+        m_tasks_waiting.release();
+      });
     }
-    word_set_type master_set;
-    for(auto&& s: m_result_queue)
-    {
-      auto context_ptr = s.get();
-      master_set.merge(context_ptr->m_words);
-    }
-
+    m_thread_pool.wait_for_all();
+    word_set_container master_set;
+    for(auto i = 0; i < m_num_threads; ++i)
+      master_set.merge(m_intermediate_sets[i]);
     std::cout << master_set.size() << "\n";
   }
 
-  void perform_set_collection_task(set_collection_context& context)
+  void perform_set_collection_task(task_context& context, std::size_t index)
   {
     using namespace std;
     using namespace string_view_literals;
     using namespace string_literals;
 
     auto& view  = context.m_view;
-    auto& words = context.m_words;
     auto& mmap  = context.m_mmap;
 
-    auto start_here = view.find_first_not_of(' ');
+    std::unordered_set<std::string>& local_word_set = m_intermediate_sets[index];
+    auto start_here = view.find_first_not_of(' ');    
     while (start_here != std::string_view::npos)
     {
       auto end_here = view.find_first_of(' ', start_here);
       auto word = view.substr(start_here, end_here - start_here);
-      words.emplace(std::string (word.begin(), word.end()));
       start_here = view.find_first_not_of(' ', end_here);
+      local_word_set.emplace(word);      
     }
-
   }
 
 private:
+  const std::size_t m_num_threads;
+  std::unique_ptr<word_set_container []> m_intermediate_sets;
   std::counting_semaphore<> m_tasks_waiting;
-  thread_pool m_pool;
-  std::deque<std::future<std::shared_ptr<set_collection_context>>> m_result_queue;
+  thread_pool m_thread_pool;
+  const std::size_t m_block_size;
 };
 
 int main(int argc, char** argv)
@@ -129,9 +122,8 @@ int main(int argc, char** argv)
     if (file_size < 1)
       throw runtime_error(format("File '{}' is empty!"s, args.at(1).string()));
 
-    master_set_collector producer;
-
-    producer.process_file(file_path);
+    word_set_scan ws_scan;
+    ws_scan.perform(file_path);
 
     return 0;
   }
