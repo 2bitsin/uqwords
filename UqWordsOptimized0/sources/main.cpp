@@ -72,11 +72,30 @@ struct word_set_scan
       block_view = block_view.substr(0, last_space_off);
       bytes_remaining -= last_space_off;
       
+      
+      if (m_intermediate.size () > 1)
+      {
+        auto first  = m_intermediate.begin();
+        auto second = std::next(first); 
+
+        if (first->wait_for(0ms) == future_status::ready &&
+            second->wait_for(0ms) == future_status::ready)
+        {
+          auto context_ptr = std::make_shared<merge_task_context>(std::move (first->get()), std::move (second->get()));
+          m_intermediate.pop_front();
+          m_intermediate.pop_front();
+
+          m_intermediate.emplace_back(m_thread_pool.async([this] (auto context_ptr) {
+            return perform_merge_task(*context_ptr);
+          }, std::move (context_ptr)));
+        }        
+      }      
+
       // Using shared ptr to work around limitations of std::function later on :/
       auto context_ptr = std::make_shared<scan_task_context>(std::move (handle), std::move (block_view));
-      m_intermediate.emplace_back(m_thread_pool.async ([this, context_ptr { std::move (context_ptr) }] () {
+      m_intermediate.emplace_back(m_thread_pool.async ([this] (auto context_ptr) {
         return perform_set_collection_task(*context_ptr);        
-      }));
+      }, std::move (context_ptr)));
     }
     
     while(m_intermediate.size() > 1)
@@ -89,15 +108,12 @@ struct word_set_scan
       auto context_ptr = std::make_shared<merge_task_context>(std::move (lhs), std::move (rhs));
 
       m_intermediate.emplace_back(m_thread_pool.async (
-        [this, context_ptr { std::move (context_ptr) }] () 
-          -> word_set_container 
+        [this] (auto context_ptr) 
         {
-          auto result_set = std::move (context_ptr->m_lhs);
-          result_set.merge(std::move (context_ptr->m_rhs));
-          return result_set;
-        }));
+          return perform_merge_task(*context_ptr);
+        }, std::move (context_ptr))); 
     }
-    
+
     assert(m_intermediate.size() == 1);
     auto master_set = std::move (m_intermediate.front().get());
 
@@ -126,6 +142,14 @@ struct word_set_scan
     }
     m_tasks_waiting.release();
     return local_word_set;
+  }
+
+  auto perform_merge_task(merge_task_context& context)
+    -> word_set_container
+  {
+    auto result = std::move (context.m_lhs);    
+    result.merge(std::move (context.m_rhs));
+    return result;
   }
 
 private:
