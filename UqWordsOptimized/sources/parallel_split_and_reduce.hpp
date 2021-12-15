@@ -16,7 +16,7 @@ struct parallel_split_and_reduce: pinned_object
   using reduce_target_type = _Reduce_target;
   using reduce_merge_type = std::tuple<reduce_target_type, reduce_target_type>;
 
-  parallel_split_and_reduce (std::uint32_t num_threads = std::thread::hardware_concurrency(), std::uint32_t task_load_factor = 64)
+  parallel_split_and_reduce (std::uint32_t num_threads, std::uint32_t task_load_factor)
   : m_num_threads { num_threads },
     m_num_waiting { num_threads * task_load_factor },
     m_thread_pool { num_threads }

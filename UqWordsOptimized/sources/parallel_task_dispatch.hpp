@@ -15,7 +15,7 @@ struct parallel_task_dispatch: pinned_object
 
   using coqueue_type = concurrent_queue<task_type>;
 
-  parallel_task_dispatch(size_t num_threads, size_t num_spins = 32)  
+  parallel_task_dispatch(size_t num_threads, size_t num_spins = 128)  
   : m_count   { num_threads },
     m_spins   { num_spins },
     m_index   { 0u },

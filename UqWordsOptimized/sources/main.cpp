@@ -29,6 +29,9 @@ auto args_validate_file_path(const auto& args, std::size_t n)
   return file_path;
 }
 
+constexpr auto buffer_size = 1024u*1024u ;// 128ull*1024ull*1024ull;
+constexpr auto task_load_factor = 128u;
+
 int main(int argc, char** argv)
 {
   using namespace std;
@@ -38,8 +41,9 @@ int main(int argc, char** argv)
   {
     vector<string_view> args{ argv, argv + argc };
     const auto file_path = args_validate_file_path(args, 1);
-    parallel_split_and_reduce<container_type> widget { std::thread::hardware_concurrency() };
-    cout << widget.apply_to_file_at_path(file_path).size() << "\n";
+    auto num_threads = std::thread::hardware_concurrency();
+    parallel_split_and_reduce<container_type> widget { num_threads, task_load_factor };
+    cout << widget.apply_to_file_at_path(file_path, buffer_size).size() << "\n";
 
     return 0;
   }
