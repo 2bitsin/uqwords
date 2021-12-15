@@ -36,10 +36,10 @@ int main(int argc, char** argv)
 
   try
   {
-    vector<std::string_view> args{ argv, argv + argc };
+    vector<string_view> args{ argv, argv + argc };
     const auto file_path = args_validate_file_path(args, 1);
     parallel_split_and_reduce<container_type> widget { std::thread::hardware_concurrency() };
-    widget.apply_to_file_at_path(file_path);
+    cout << widget.apply_to_file_at_path(file_path).size() << "\n";
 
     return 0;
   }

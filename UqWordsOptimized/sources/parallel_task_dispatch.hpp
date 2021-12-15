@@ -4,17 +4,18 @@
 #include <mutex>
 #include <future>
 #include <type_traits>
+//#include <ranges>
 
 #include "concurrent_queue.hpp"
 #include "pinned_object.hpp"
 
-struct thread_pool: pinned_object
+struct parallel_task_dispatch: pinned_object
 {
   using task_type = std::function<void(std::size_t index)>;
 
   using coqueue_type = concurrent_queue<task_type>;
 
-  thread_pool(size_t num_threads, size_t num_spins = 32)  
+  parallel_task_dispatch(size_t num_threads, size_t num_spins = 32)  
   : m_count   { num_threads },
     m_spins   { num_spins },
     m_index   { 0u },
@@ -22,11 +23,11 @@ struct thread_pool: pinned_object
     m_queues  { std::make_unique_for_overwrite<coqueue_type []>(num_threads) }
   {
     std::for_each_n (m_handles.get(), m_count, [this, index = 0u] (auto& handle) mutable{
-      handle = std::jthread { &thread_pool::perform_tasks, this, m_breaks.get_token(), index++ };
+      handle = std::jthread { &parallel_task_dispatch::perform_tasks, this, m_breaks.get_token(), index++ };
     });
   }
 
- ~thread_pool()
+ ~parallel_task_dispatch()
   {
     m_breaks.request_stop();
   }
@@ -35,6 +36,7 @@ struct thread_pool: pinned_object
   requires (std::is_invocable_v<Task_type, std::size_t>)
   void enqueue(Task_type&& task)
   {
+    m_active.fetch_add(1, std::memory_order::release);
     const auto number_of_iteration = m_spins * m_count ;
     const auto next_slot = m_index++ ;
 
@@ -49,7 +51,7 @@ struct thread_pool: pinned_object
     m_queues[next_slot % m_count]
       .wait_push (std::forward<Task_type>(task));
   }
-  
+
   template <typename Task_type, typename... Args>
   auto async(Task_type&& task, Args&&... args)
   {
@@ -77,6 +79,11 @@ struct thread_pool: pinned_object
       m_queues[i].wait_until_empty();
   }
 
+  auto active() const
+  {
+    return m_active.load(std::memory_order::acquire);
+  }
+
 private:
   void perform_tasks(const std::stop_token& stop_token, std::size_t index)
   {
@@ -93,7 +100,17 @@ private:
       
       if (!current_task && !m_queues[index % m_count].wait_pop (current_task))
         break;
-      current_task (index);
+
+      try
+      {        
+        current_task (index);
+        m_active.fetch_sub(1, std::memory_order::release);
+      }
+      catch(const std::exception& ex)
+      {
+        assert(false);
+        std::cerr << ex.what() << std::endl;      
+      }
     }
   }
 
@@ -104,4 +121,5 @@ private:
   std::unique_ptr<std::jthread []>  m_handles;  
   std::unique_ptr<coqueue_type []>  m_queues;
   std::stop_source                  m_breaks;
+  std::atomic<int>                  m_active;
 };

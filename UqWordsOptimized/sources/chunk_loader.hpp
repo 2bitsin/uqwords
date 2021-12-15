@@ -40,6 +40,8 @@ struct chunk_loader
     std::string_view  m_string;
   };
 
+  using shared_chunk_type = std::shared_ptr<chunk_type>;
+
   chunk_loader(std::filesystem::path path, std::size_t chunk_size)
   : m_file { file_wrapper::open(path, O_RDONLY) },
     m_chunk_size { chunk_size },
@@ -48,20 +50,19 @@ struct chunk_loader
 
   auto next (char delimiter = ' ') -> std::optional<chunk_type> 
   {
-    if (m_bytes_left <= 0)
+    if (m_bytes_left <= 0) {
       return std::nullopt;
+    }
 
     auto bytes_to_take = std::min (m_bytes_left, m_chunk_size);
     auto start_here = m_file.size() - m_bytes_left;
-    auto [handle, block_view] = m_file.map_string_view(start_here, start_here + bytes_to_take);
-    auto last_space_off = block_view.find_last_of(delimiter) + 1;
-    block_view = block_view.substr(0, last_space_off);
+    auto [handle, s_view] = m_file.map_string_view(start_here, start_here + bytes_to_take);
+    auto last_space_off = s_view.find_last_of(delimiter) + 1;
+    
+    s_view = s_view.substr(0, last_space_off);
     m_bytes_left -= last_space_off;    
 
-    return chunk_type { 
-      std::move (handle), 
-      std::move (block_view)
-    };
+    return chunk_type { std::move (handle), std::move (s_view) };
   }
 
   auto next_shared (char delimiter = ' ') -> std::shared_ptr<chunk_type>

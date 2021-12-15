@@ -11,6 +11,7 @@ struct concurrent_queue: pinned_object
 {
   template <typename Current_item_type>
   requires (std::is_convertible_v<Current_item_type, Item_type>)
+  [[nodiscard]]
   bool try_push (Current_item_type&& item)
   {
     std::unique_lock<std::mutex> hold_lock { m_mutex, std::try_to_lock };    
@@ -21,6 +22,7 @@ struct concurrent_queue: pinned_object
     return true;
   }
 
+  [[nodiscard]]
   bool try_pop (Item_type& output_item)
   {
     std::unique_lock<std::mutex> hold_lock { m_mutex, std::try_to_lock };    
@@ -31,6 +33,7 @@ struct concurrent_queue: pinned_object
     return true;
   }
 
+  [[nodiscard]]
   bool wait_check_empty () const
   {
     std::unique_lock<std::mutex> hold_lock { m_mutex };
@@ -39,13 +42,15 @@ struct concurrent_queue: pinned_object
 
   template <typename Current_item_type>  
   requires (std::is_convertible_v<Current_item_type, Item_type>)
-  void wait_push (Current_item_type&& item)  
+  bool wait_push (Current_item_type&& item)  
   {
     std::unique_lock<std::mutex> hold_lock { m_mutex };
     m_items.emplace_back (std::forward<Current_item_type>(item));
     m_ready.notify_one ();
+    return true;
   }
 
+  [[nodiscard]]
   bool wait_pop (Item_type& output_item)
   {
     std::unique_lock<std::mutex> hold_lock { m_mutex };
@@ -82,7 +87,7 @@ struct concurrent_queue: pinned_object
 
 private:  
   std::deque<Item_type>   m_items;
-  std::mutex              m_mutex;
+  mutable std::mutex      m_mutex;
   std::condition_variable m_ready;  
   std::atomic<bool>       m_done;
   
