@@ -6,11 +6,11 @@
 #include <array>
 #include <memory>
 
-struct word_set_container
+struct ws_container
 {
   using node_type = std::array<uint32_t, 'z' - 'a' + 1>;
 
-  word_set_container(std::size_t preallocate = (1ull*1024ull*1024ull*1024ull)/sizeof(node_type))
+  ws_container(std::size_t preallocate = (1ull*1024ull*1024ull*1024ull)/sizeof(node_type))
   : m_pool_size { preallocate },
     m_pool_next { 0 }, 
     m_pool_node { std::make_unique_for_overwrite<node_type[]>(preallocate) }
@@ -18,13 +18,13 @@ struct word_set_container
     allocate_node();
   }
 
- ~word_set_container() {};
+ ~ws_container() {};
 
   std::size_t allocate_node()
   {
     assert(m_pool_next < m_pool_size);
     if (m_pool_next >= m_pool_size)
-      throw std::runtime_error("word_set_container: pool exhausted");
+      throw std::runtime_error("ws_container: pool exhausted");
     auto index = m_pool_next++;
     std::ranges::fill(m_pool_node[index], 0);
     return index;
@@ -68,7 +68,7 @@ struct word_set_container
     iterate_ ("", 0, callee);
   }
 
-  void merge(const word_set_container& what)
+  void merge(const ws_container& what)
   {
     what.iterate([&](std::string_view word) {
       emplace(word);
