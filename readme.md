@@ -17,3 +17,5 @@ I have written a very basic thread pool system with task stealing to handle this
 Yes it's based on the one described by Sean Parent in his talk "Better Code Concurrency"
 
 I could spread the I/O load accross worker threads instead of the producer thread, but that does not give me any more I/O troughput anyway so no real benefit.
+
+The whole things was tested on a 32GiB file.
