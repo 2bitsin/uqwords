@@ -91,9 +91,9 @@ struct parallel_split_and_reduce: pinned_object
         
       }
     }
-
+    // TODO fix ready_partial_sets + partial_sets
     partition(partial_sets.begin(), partial_sets.end(), is_future_ready);
-    while(partial_sets.size () > 1)
+    while(partial_sets.size () > 1 )
     {            
       m_num_waiting.acquire();
 
